@@ -9,7 +9,6 @@ program :name, "intake"
 program :version, '2.0'
 program :description, 'A simple command line based macro manager'
 
-# I should probably definitely not upload this to github with username password sitting here...
 DB = Sequel.connect(:adapter=>'mysql', :host=>ApplicationConfig::DB_HOST, :port=>ApplicationConfig::DB_PORT, :database=>'intake_test', :user=>ApplicationConfig::DB_USER, :password=>ApplicationConfig::DB_PASSWORD)
 #DB = Sequel.connect(:adapter=>'mysql', :host=>ApplicationConfig::DB_HOST, :port=>ApplicationConfig::DB_PORT, :database=>'intake', :user=>ApplicationConfig::DB_USER, :password=>ApplicationConfig::DB_PASSWORD)
 
