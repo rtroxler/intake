@@ -1,0 +1,205 @@
+#!/usr/bin/env ruby
+require 'rubygems'
+require "bundler/setup"
+require 'commander/import'
+require 'sequel'
+require_relative '../config/base.rb'
+
+program :name, "intake"
+program :version, '2.0'
+program :description, 'A simple command line based macro manager'
+
+# I should probably definitely not upload this to github with username password sitting here...
+DB = Sequel.connect(:adapter=>'mysql', :host=>ApplicationConfig::DB_HOST, :port=>ApplicationConfig::DB_PORT, :database=>'intake_test', :user=>ApplicationConfig::DB_USER, :password=>ApplicationConfig::DB_PASSWORD)
+#DB = Sequel.connect(:adapter=>'mysql', :host=>ApplicationConfig::DB_HOST, :port=>ApplicationConfig::DB_PORT, :database=>'intake', :user=>ApplicationConfig::DB_USER, :password=>ApplicationConfig::DB_PASSWORD)
+
+unless DB.table_exists? :food
+  DB.create_table(:food) do
+    primary_key :id
+    String :name
+    Integer :fat
+    Integer :carbs
+    Integer :protein
+  end
+end
+
+unless DB.table_exists? :intake
+  DB.create_table(:intake) do
+    primary_key :id
+    DateTime :date
+    Integer :daily_fat
+    Integer :daily_carbs
+    Integer :daily_protein
+  end
+end
+
+foods = DB[:food]
+daily_intake = DB[:intake]
+
+
+
+###
+#Adds <food> to todays total intake, creates <food> if it doesn't exist yet.
+###
+command :ate do |c|
+  c.syntax = 'intake ate <food>'
+  c.description = 'Records a food eaten'
+  c.action do |args, options|
+    if args.first.nil?
+      puts 'Please specify food eaten.'
+    else
+      foodname = args.join(' ')
+      food = foods.where(:name => foodname)
+
+      fat,carbs,protein = 0
+      unless food.any?
+        #if food doesn't exist, take in name and split up macros
+        macros = ask("What are #{foodname}'s macros?")
+        fat,carbs,protein = macros.split(/[\s\/-]/)
+        foods.insert(:name => foodname, :fat => fat, :carbs => carbs, :protein => protein)
+      else
+        fat = food.first[:fat]
+        carbs = food.first[:carbs]
+        protein = food.first[:protein]
+      end
+
+      todays_intake = daily_intake.where(:date => DateTime.now.to_date)
+      unless todays_intake.any?
+        daily_intake.insert(:date => DateTime.now.to_date, :daily_fat => fat, :daily_carbs => carbs, :daily_protein => protein)
+      else
+        total_fat = todays_intake.first[:daily_fat].to_i + fat.to_i
+        total_carbs = todays_intake.first[:daily_carbs].to_i + carbs.to_i
+        total_protein = todays_intake.first[:daily_protein].to_i + protein.to_i
+        todays_intake.update(:daily_fat => total_fat, :daily_carbs => total_carbs, :daily_protein => total_protein)
+      end
+
+      print_todays_intake daily_intake
+    end
+  end
+end
+
+###
+#Reverses eating a certain food
+###
+command :uneat do |c|
+  c.syntax = 'intake uneat <food>'
+  c.description = 'Reverses eating something (if only we could really do this...)'
+  c.action do |args, options|
+    if args.first.nil?
+      puts 'Please specify food to uneat.'
+    else
+      foodname = args.join(' ')
+      food = foods.where(:name => foodname)
+
+      fat,carbs,protein = 0
+      unless food.any?
+        puts "The food provided could not be found."
+        exit
+      else
+        fat = food.first[:fat]
+        carbs = food.first[:carbs]
+        protein = food.first[:protein]
+      end
+
+      todays_intake = daily_intake.where(:date => DateTime.now.to_date)
+      unless todays_intake.any?
+        puts "You haven't eaten anything today, you can't uneat something if you haven't eaten yet!"
+        exit
+      else
+        # Should really guard to make sure I only uneat things I've eaten today... but not sure how I'd do that, add a new table to stick things that have been eaten and check it?
+        total_fat = todays_intake.first[:daily_fat].to_i - fat.to_i
+        total_carbs = todays_intake.first[:daily_carbs].to_i - carbs.to_i
+        total_protein = todays_intake.first[:daily_protein].to_i - protein.to_i
+        todays_intake.update(:daily_fat => total_fat, :daily_carbs => total_carbs, :daily_protein => total_protein)
+      end
+
+      print_todays_intake daily_intake
+    end
+  end
+end
+
+
+command :search do |c|
+  c.syntax = 'intake search <query>'
+  c.description = 'Searches for any foods matching the query'
+  c.action do |args, options|
+    if args.first.nil?
+      puts 'Please provide a query.'
+    else
+      query = args.join(' ')
+      returned_foods = foods.where(:name.like("%#{query}%"))
+      returned_foods.each do |food|
+        print_food food
+      end
+    end
+  end
+end
+
+
+###
+#Lists the food in the database
+###
+command :list do |c|
+  c.syntax = 'intake list'
+  c.description = 'Lists all food in the database.'
+  c.action do |args, options|
+    if args.first.nil?
+      foods.each do |food|
+        print_food food
+      end
+    else
+      foods.where(:name => args.first).each  do |food|
+        print_food food
+      end
+    end
+  end
+end
+
+###
+#Removes a food in the database
+###
+command :remove do |c|
+  c.syntax = 'intake remove <food>'
+  c.description = 'Removes food by name.'
+  c.action do |args, options|
+    if args.first.nil?
+      puts 'Please specify the food to be deleted.'
+    else
+      foodname = args.join(' ')
+      items = foods.where(:name => foodname)
+      if items.count > 0
+        puts "Deleting #{items.first[:name]}..."
+        items.delete
+        puts "Deleted."
+      else
+        puts "No food found by that name."
+      end
+    end
+  end
+end
+
+###
+#Prints todays intake
+###
+command :today do |c|
+  c.syntax = 'intake today'
+  c.description = 'Lists todays intake.'
+  c.action do |args, options|
+    print_todays_intake daily_intake
+    # When I add a table to track food eaten today? can list them here
+  end
+end
+
+
+def print_food food
+  puts "#{food[:name]}: #{food[:fat]} / #{food[:carbs]} / #{food[:protein]}"
+end
+
+def print_todays_intake intake
+  today = intake.where(:date => DateTime.now.to_date).first
+  if today
+    puts "Today's intake : #{today[:daily_fat]} / #{today[:daily_carbs]} / #{today[:daily_protein]}"
+  else
+    puts "You haven't eaten anything today."
+  end
+end
