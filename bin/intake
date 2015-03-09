@@ -3,14 +3,18 @@ require 'rubygems'
 require "bundler/setup"
 require 'commander/import'
 require 'sequel'
-require_relative '../config/base.rb'
 
 program :name, "intake"
 program :version, '2.0'
 program :description, 'A simple command line based macro manager'
 
-DB = Sequel.connect(:adapter=>'mysql', :host=>ApplicationConfig::DB_HOST, :port=>ApplicationConfig::DB_PORT, :database=>'intake_test', :user=>ApplicationConfig::DB_USER, :password=>ApplicationConfig::DB_PASSWORD)
-#DB = Sequel.connect(:adapter=>'mysql', :host=>ApplicationConfig::DB_HOST, :port=>ApplicationConfig::DB_PORT, :database=>'intake', :user=>ApplicationConfig::DB_USER, :password=>ApplicationConfig::DB_PASSWORD)
+config_dir = File.expand_path('~/.intake')
+unless Dir[config_dir].length > 0
+    Dir::mkdir(config_dir)
+end
+
+DB = Sequel.sqlite("#{config_dir}/intake.db")
+#DB = Sequel.sqlite("#{config_dir}/intake_test.db")
 
 unless DB.table_exists? :food
   DB.create_table(:food) do
@@ -48,29 +52,10 @@ command :ate do |c|
       puts 'Please specify food eaten.'
     else
       foodname = args.join(' ')
-      food = foods.where(:name => foodname)
 
-      fat,carbs,protein = 0
-      unless food.any?
-        #if food doesn't exist, take in name and split up macros
-        macros = ask("What are #{foodname}'s macros?")
-        fat,carbs,protein = macros.split(/[\s\/-]/)
-        foods.insert(:name => foodname, :fat => fat, :carbs => carbs, :protein => protein)
-      else
-        fat = food.first[:fat]
-        carbs = food.first[:carbs]
-        protein = food.first[:protein]
-      end
+      fat,carbs,protein = find_or_build_food_with foodname, foods
 
-      todays_intake = daily_intake.where(:date => DateTime.now.to_date)
-      unless todays_intake.any?
-        daily_intake.insert(:date => DateTime.now.to_date, :daily_fat => fat, :daily_carbs => carbs, :daily_protein => protein)
-      else
-        total_fat = todays_intake.first[:daily_fat].to_i + fat.to_i
-        total_carbs = todays_intake.first[:daily_carbs].to_i + carbs.to_i
-        total_protein = todays_intake.first[:daily_protein].to_i + protein.to_i
-        todays_intake.update(:daily_fat => total_fat, :daily_carbs => total_carbs, :daily_protein => total_protein)
-      end
+      add_to_daily_intake fat, carbs, protein, daily_intake
 
       print_todays_intake daily_intake
     end
@@ -118,6 +103,70 @@ command :uneat do |c|
 end
 
 
+command :make do |c|
+  c.syntax = 'intake make <food>'
+  c.description = 'Adds a food made up of other foods without having to add it all up..'
+  c.action do |args, options|
+    if args.first.nil?
+      puts 'Please specify food to make.'
+    else
+      foodname = args.join(' ')
+      # check if foodname exists, ask if want to overwrite it if so?
+      food = foods.where(name: foodname)
+      if food.any?
+        answer = ask("This food already exists in the database. Do you want to (o)verwrite it? Or (e)at it (#{food.first[:fat]}/#{food.first[:carbs]}/#{food.first[:protein]})?")
+        if answer == "e"
+          puts "Eating #{foodname}."
+          eat_food_with_name foodname, foods, daily_intake
+          exit
+        elsif answer != "o"
+          puts "I don't understand your response, shutting down."
+          exit
+        end
+      end
+      # This is kinda gross, but it's an easy way to make the question look nicer.
+      total_fat, total_carbs, total_protein, i = 0,0,0,0
+      loop do
+        ingredient = ask("What #{i == 0 ? "" : "else "}is in #{foodname}? : ")
+        break if ingredient.empty?
+        fat, carbs, protein = find_or_build_food_with ingredient, foods
+        total_fat += fat.to_i
+        total_carbs += carbs.to_i
+        total_protein += protein.to_i
+        i+=1
+      end
+      puts "Creating #{foodname} with #{total_fat}/#{total_carbs}/#{total_protein}."
+      foods.insert(:name => foodname, :fat => total_fat, :carbs => total_carbs, :protein => total_protein)
+
+      add_to_daily_intake total_fat, total_carbs, total_protein, daily_intake
+      print_todays_intake daily_intake
+    end
+  end
+end
+
+
+
+command :order do |c|
+  c.syntax = 'intake order <macro>'
+  c.description = 'Orders food by the given macro (fat, carbs, or protein)'
+  c.option '-a', 'Flag used to order by ascending'
+  c.action do |args, options|
+    if args.first && %w(fat carbs protein).include?(args.first)
+      unless options.a
+        ordered_foods = foods.reverse_order(args.first.to_sym).limit(15)
+      else
+        ordered_foods = foods.order(args.first.to_sym).limit(15)
+      end
+      ordered_foods.each do |food|
+        print_food food
+      end
+    else
+      puts 'You must provide either fat, carbs, or protein.'
+    end
+  end
+end
+
+
 command :search do |c|
   c.syntax = 'intake search <query>'
   c.description = 'Searches for any foods matching the query'
@@ -150,6 +199,22 @@ command :list do |c|
       foods.where(:name => args.first).each  do |food|
         print_food food
       end
+    end
+  end
+end
+
+command :add do |c|
+  c.syntax = 'intake add <food>'
+  c.description = 'Adds a food to DB.'
+  c.action do |args, options|
+    if args.first.nil?
+      puts 'Please specify food eaten.'
+    else
+      foodname = args.join(' ')
+      macros = ask("What are #{foodname}'s macros? : ")
+      fat,carbs,protein = macros.split(/[\s\/-]/)
+      foods.insert(:name => foodname, :fat => fat, :carbs => carbs, :protein => protein)
+      puts "Great success!"
     end
   end
 end
@@ -201,4 +266,43 @@ def print_todays_intake intake
   else
     puts "You haven't eaten anything today."
   end
+end
+
+def find_or_build_food_with name, foods
+  food = foods.where(:name => name)
+
+  fat,carbs,protein = 0
+  unless food.any?
+    #if food doesn't exist, take in name and split up macros
+    macros = ask("What are #{name}'s macros? : ")
+    fat,carbs,protein = macros.split(/[\s\/-]/)
+    foods.insert(:name => name, :fat => fat, :carbs => carbs, :protein => protein)
+  else
+    print_food food.first
+    fat = food.first[:fat]
+    carbs = food.first[:carbs]
+    protein = food.first[:protein]
+  end
+  return fat, carbs, protein
+end
+
+def add_to_daily_intake fat, carbs, protein, daily_intake
+  todays_intake = daily_intake.where(:date => DateTime.now.to_date)
+  unless todays_intake.any?
+    daily_intake.insert(:date => DateTime.now.to_date, :daily_fat => fat, :daily_carbs => carbs, :daily_protein => protein)
+  else
+    total_fat = todays_intake.first[:daily_fat].to_i + fat.to_i
+    total_carbs = todays_intake.first[:daily_carbs].to_i + carbs.to_i
+    total_protein = todays_intake.first[:daily_protein].to_i + protein.to_i
+    todays_intake.update(:daily_fat => total_fat, :daily_carbs => total_carbs, :daily_protein => total_protein)
+  end
+end
+
+def eat_food_with_name name, foods, daily_intake
+  food = foods.where(name: name)
+  fat = food.first[:fat]
+  carbs = food.first[:carbs]
+  protein = food.first[:protein]
+
+  add_to_daily_intake fat, carbs, protein, daily_intake
 end

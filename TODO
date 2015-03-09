@@ -1,18 +1,26 @@
 finder for food? DONE
 
-ORDER BY PROTEIN!!
+ORDER BY PROTEIN!! DONE
 
-
-Find a way to not have my username password sitting there... would be good..
-Have a config file that doesn't get checked in, similar to application_config/local/base.rb in Rails
 
 
 Find a way to set target
 
 
-have intake fix burrito
-    ' What is in burrito?
-    and calculate it itself
+have intake fix burrito ' What is in burrito?  and calculate it itself intake make burrito
+DONE?
+
+Add an option for multiplier
+eggs -x 4
+
+
+
+
+
+
+after having target, have a intake whatsleftfortoday or something lol which would list all foods that would fit in my leftover macros
+
+
 
 
 counting shit
