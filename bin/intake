@@ -261,8 +261,19 @@ end
 
 def print_todays_intake intake
   today = intake.where(:date => DateTime.now.to_date).first
+  target_fat = 53
+  target_carbs = 215
+  target_protein = 144
+  target_cals = 1944
   if today
-    puts "Today's intake : #{today[:daily_fat]} / #{today[:daily_carbs]} / #{today[:daily_protein]}"
+    total_cals = ( today[:daily_fat] * 9 ) + ( today[:daily_carbs] * 4 ) + ( today[:daily_protein] * 4 )
+    fat = target_fat - today[:daily_fat]
+    carbs = target_carbs - today[:daily_carbs]
+    protein = target_protein - today[:daily_protein]
+    puts "   Goal macros : #{target_fat} / #{target_carbs} / #{target_protein} - 1944 calories"
+    puts "Today's intake : #{today[:daily_fat]} / #{today[:daily_carbs]} / #{today[:daily_protein]} - #{total_cals} calories"
+    puts "-----------------------------------------------"
+    puts "     Remaining : #{fat} / #{carbs} / #{protein} - #{1944 - total_cals} calories"
   else
     puts "You haven't eaten anything today."
   end
